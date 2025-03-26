@@ -20,7 +20,7 @@ class Qwirkle:
         self.hands = {}
         for i in range(num_players):
 
-    def is
+    def
 
     def shuffle_deck(self) -> bool:
         if self.deck.size > 0:
