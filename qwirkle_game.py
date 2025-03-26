@@ -20,8 +20,6 @@ class Qwirkle:
         self.hands = {}
         for i in range(num_players):
 
-    def
-
     def shuffle_deck(self) -> bool:
         if self.deck.size > 0:
             np.random.shuffle(self.deck)
