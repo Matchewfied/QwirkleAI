@@ -35,10 +35,10 @@ class Test:
     def execute_test(self) -> tuple:
         # If specific errors have been given, use try and except
         if not self.exceptions:
-            status, status_msg, after_state = self.test_fn(self.args, self.kwargs)
+            status, status_msg, after_state = self.test_fn(*self.args, *self.kwargs)
         else:
             try:
-                status, status_msg, after_state = self.test_fn(self.args, self.kwargs)
+                status, status_msg, after_state = self.test_fn(*self.args, *self.kwargs)
             except self.exceptions as e:
                 status, status_msg, after_state = ERROR, e, ""
 
@@ -98,7 +98,7 @@ class TestSuite:
             print(f"{num_errored} tests threw an error.")
             print(f"{num_dnr} tests did not run.")
 
-    def display_context_results(self, context: str, display_failure_states: bool = False) -> None:
+    def display_context_results(self, context: str = "default", display_failure_states: bool = False) -> None:
         self.process_context(context, display_failure_states=display_failure_states)
 
     def display_all_context_results(self, display_failure_states: bool = False) -> None:
@@ -147,11 +147,11 @@ class TestSuite:
         self.test_deck[name] = test
 
     def create_and_add_test_(self, name: str, desc: str, test_fn: Callable[..., Any], exceptions: tuple = (), *args, **kwargs) -> None:
-        test = Test(name, desc, test_fn, exceptions, args, kwargs)
+        test = Test(name, desc, test_fn, exceptions, *args, *kwargs)
         self.add_test_(test)
 
     def cat_(self, name: str, desc: str, test_fn: Callable[..., Any], exceptions: tuple = (), *args, **kwargs):
-        self.create_and_add_test_(name, desc, test_fn, exceptions, args, kwargs)
+        self.create_and_add_test_(name, desc, test_fn, exceptions, *args, *kwargs)
 
     def remove_test_(self, test_name: str) -> None:
         if test_name in self.test_deck:

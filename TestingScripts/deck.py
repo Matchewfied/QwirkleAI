@@ -30,18 +30,16 @@ class Deck:
             drawn.append(self.deck.pop())
         return drawn
 
-    def place_(self, to_place: list, num: int = None) -> list:
-        size = len(to_place) if num is not None else num
-        remainder = to_place[size:]
-        self.deck.extend(to_place[:size])
-        return remainder
+    def place_(self, to_place: list, flipped: bool = False) -> None:
+        step = -1 if flipped else 1
+        self.deck.extend(to_place[::step])
 
     def trade_(self, to_trade: list) -> list:
-        drawn = self.draw_(len(to_trade))
-        remainder = self.place_(to_trade, len(drawn))
-        remainder.extend(drawn)
-
-        return remainder
+        hand = self.draw_(len(to_trade))
+        to_return = to_trade[:len(hand)]
+        hand.extend(to_trade[len(hand):])
+        self.place_(to_return)
+        return hand
 
     def set_(self, contents: list) -> None:
         self.deck = deque(contents)
