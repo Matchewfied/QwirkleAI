@@ -1,0 +1,253 @@
+import logging
+import torch
+import torch.optim as optim
+import torch.nn as nn
+
+
+DEFAULT_SEED = 22
+
+
+class SLTrainer:
+    def __init__(self,
+                 model,
+                 session_name,
+                 optimizer,
+                 batch_size: int,
+                 num_classes: int,
+                 train_data,
+                 train_labels,
+                 val_data=None,
+                 val_labels=None,
+                 loss_fn=None,
+                 seed: int = DEFAULT_SEED,
+                 stats_path=None,
+                 logging_path=None,
+                 checkpoint_path=None,
+                 plotting_path=None):
+
+        self.session_name = session_name
+
+        # Initialize logger
+        self.logger = logging.getLogger('SLTrainerLogger')
+        self.logger.setLevel(logging.DEBUG)
+
+        formatter = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        if logging_path is not None:
+            file_handler = logging.FileHandler("custom_log.log")
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+            self.logger.info("Logger for session %s has been initialized. Logs being saved to %s", session_name, logging_path)
+        else:
+            self.logger.info("Logger for session %s has been initialized. No logging path provided to save logs.", session_name)
+
+        # For num_classes > 1, don't include Sigmoid or Softmax in model architecture if using default loss functions.
+        self.model = model
+        self.optimizer = optimizer
+
+        # Verify mode being used
+        if num_classes < 1:
+            self.logger.error("Please set the num_classes parameter to 1 or greater.")
+            raise ValueError("Please set the num_classes parameter to 1 or greater.")
+
+        self.num_classes = num_classes
+        if num_classes == 1:
+            self.logger.info("Regression Mode activated since num_classes was set to %d", num_classes)
+        else:
+            self.logger.info("Classification Mode activated since num_classes was set to %d", num_classes)
+
+        # Set default loss function, unless loss function is explicitly provided.
+        if loss_fn is None:
+            self.logger.info("No loss function provided.")
+            if num_classes == 1:
+                self.logger.info("Regression Mode (1 class): Default MSELoss set as loss function.")
+                self.loss_fn = nn.MSELoss()
+            if num_classes == 2:
+                self.logger.info("Classification Mode (2 classes): Default BCEWithLogitsLoss set as loss function.")
+                self.loss_fn = nn.BCEWithLogitsLoss()
+            if num_classes > 2:
+                self.logger.info("Classification Mode (%d classes): Default CrossEntropyLoss set as loss function.", num_classes)
+                self.loss_fn = nn.CrossEntropyLoss()
+        else:
+            self.logger.info("Custom loss function initialized.")
+            self.loss_fn = loss_fn
+
+        # Initialize batch size for minibatch training
+        # If batch_size == 1 or if batch_size == size of training data, special options will be used.
+        self.batch_size = batch_size
+
+        self.train_data = train_data
+        self.train_labels = train_labels
+
+        # Set validation data if being used (there are RL cases in which validation is not used)
+        if val_data is not None and val_labels is None:
+            self.logger.error("If validation data is provided, val_labels parameter must be populated.")
+            raise ValueError("If validation data is provided, val_labels parameter must be populated.")
+        elif val_data is None and val_labels is not None:
+            self.logger.error("If validation labels are provided, val_data parameter must be populated.")
+            raise ValueError("If validation labels are provided, val_data parameter must be populated.")
+        elif val_data is not None:
+            self.logger.info("Validation Mode set.")
+        self.val_data = val_data
+        self.val_labels = val_labels
+
+        # Set seed
+        self.logger.info("Torch seed set to %d", seed)
+        self.seed = seed
+        torch.manual_seed(seed)
+
+        # Set save paths
+        self.checkpoint_path = checkpoint_path
+        if checkpoint_path is not None:
+            self.logger.info("Checkpoint path set to %s", checkpoint_path)
+        else:
+            self.logger.warning("No checkpoint path provided. No model checkpoints will be saved by SLTrainer")
+
+        self.plotting_path = plotting_path
+        if plotting_path is not None:
+            self.logger.info("Plotting path set to %s", plotting_path)
+        else:
+            self.logger.warning("No plotting path provided. No plots will be generated by SLTrainer.")
+
+        self.stats_path = stats_path
+        if stats_path is not None:
+            self.logger.info("Stats path set to %s", plotting_path)
+        else:
+            self.logger.warning("No stats path provided. No losses/accuracies will be saved by SLTrainer.")
+
+
+    def compute_loss(self, datapoints, targets) -> torch.tensor:
+        outputs = self.model(datapoints)
+        loss = self.loss_fn(outputs, targets)
+        return loss
+
+    def compute_loss_and_accuracy(self, datapoints, labels) -> (float, float):
+        outputs = self.model(datapoints)
+        loss = self.loss_fn(outputs, labels)
+        predictions = torch.argmax(outputs, dim=1)
+        correct_predictions = (predictions == labels).sum().item()
+        accuracy = correct_predictions / len(labels)
+        return loss, accuracy
+
+    def train_step(self, n_iters=None):
+        dataset_size = self.train_data.shape[0]
+        if n_iters is None:
+            n_iters = dataset_size // self.batch_size
+
+        for i in range(n_iters):
+            # Apply special options if doing pure singleton SGD or full batch GD for efficiency purposes
+            if self.batch_size == dataset_size:
+                datapoints, labels = self.train_data, self.train_labels
+            elif self.batch_size == 1:
+                indices = torch.rand(dataset_size)
+                datapoints, labels = self.train_data[indices], self.train_labels[indices]
+            else:
+                indices = torch.randperm(dataset_size)[:self.batch_size]
+                datapoints, labels = self.train_data[indices], self.train_labels[indices]
+
+            # Compute loss
+            loss = self.compute_loss(datapoints, labels)
+
+            # Update model weights
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+    def save_plots(self, values: list, title: str):
+        if not values:
+            return
+        pass
+
+    def test(self, data, labels):
+        with torch.no_grad():
+            if self.in_regress_mode():
+                loss, acc = self.compute_loss(data, labels), 0
+            else:
+                loss, acc = self.compute_loss_and_accuracy(data, labels)
+
+            return loss, acc
+
+    def train(self, epochs, n_iters=None):
+        best_loss = float('-inf')
+        # If in plot mode, need to store results to plot
+        train_results, val_results = [], []
+
+        for k in range(epochs):
+            # Enter training mode and perform training step
+            self.model.train()
+            self.logger.info("Beginning training for Epoch %d", k + 1)
+            self.train_step(n_iters)
+            self.logger.info("Completed.")
+
+            # Enter evaluation mode and get training stats and validation stats
+            self.model.eval()
+
+            train_loss, train_acc = self.test(self.train_data, self.train_labels)
+            train_results.append((train_loss, train_acc))
+            if self.in_regress_mode():
+                self.logger.info("Training Loss is %f", train_loss)
+            else:
+                self.logger.info("Training Loss is %f", train_loss)
+                self.logger.info("Training accuracy is %f", train_acc)
+
+            if self.in_val_mode():
+                self.logger.info("Beginning validation for Epoch %d", k + 1)
+                val_loss, val_acc = self.test(self.val_data, self.val_labels)
+                val_results.append((val_loss, val_acc))
+                self.logger.info("Completed.")
+
+                if self.in_regress_mode():
+                    self.logger.info("Validation Loss is %f", val_loss)
+                else:
+                    self.logger.info("Validation Loss is %f", val_loss)
+                    self.logger.info("Validation accuracy is %f", val_acc)
+
+                if self.in_save_mode() and best_loss > val_loss:
+                    # Do save logic
+                    pass
+
+            if self.in_plot_mode():
+                self.save_plots(train_results, 'title')
+                self.save_plots(val_results, 'title')
+
+
+
+
+
+    # Regress mode is defined as the number of classes being 1
+    def in_regress_mode(self) -> bool:
+        return self.num_classes == 1
+
+    def in_val_mode(self) -> bool:
+        return self.val_data is not None and self.val_labels is not None
+
+    def in_plot_mode(self) -> bool:
+        return self.plotting_path is not None
+
+    def in_save_mode(self) -> bool:
+        return self.checkpoint_path is not None
+
+    def set_loss_fn(self, loss_fn):
+        self.loss_fn = loss_fn
+
+    def set_checkpoint_path(self, checkpoint_path):
+        self.checkpoint_path = checkpoint_path
+
+    def set_train_data(self, train_data, train_labels):
+        self.train_data = train_data
+        self.train_labels = train_labels
+
+    def set_val_data(self, val_data, val_labels):
+        self.val_data = val_data
+        self.val_labels = val_labels
+
+    def set_optimizer(self, optimizer):
+        self.optimizer = optimizer
+
+
